@@ -3,6 +3,9 @@ from itertools import chain
 import string
 
 
+USE_PHANTOMS = False
+
+
 def _select_next(view, selection, direction, char, extend=False):
     a, b = sorted(selection.to_tuple())
 
@@ -57,7 +60,8 @@ class SelectNextCharCommand(sublime_plugin.TextCommand):
 
 
 class SelectNextCharSelectionCommand(
-    sublime_plugin.TextCommand, sublime_plugin.WindowCommand
+    sublime_plugin.TextCommand,
+    sublime_plugin.WindowCommand,
 ):
     """Go to the next string matching the current selection and select it."""
 
@@ -153,6 +157,7 @@ class SelectCharSelectionCommand(sublime_plugin.TextCommand):
         self.charset = (
             self.view.settings().get("select_next_char_charset") or self.CHARSET
         )
+        self.exit = False
         if char != "enter":
             self._find_match_views(char)
 
@@ -185,39 +190,43 @@ class SelectCharSelectionCommand(sublime_plugin.TextCommand):
 
         positions = dict(zip(charset, matches))
 
-        if view.id() not in phantom_sets:
-            phantom_sets[view.id()] = sublime.PhantomSet(view)
+        if USE_PHANTOMS:
+            if view.id() not in phantom_sets:
+                phantom_sets[view.id()] = sublime.PhantomSet(view)
+            phantoms = [
+                sublime.Phantom(
+                    sublime.Region(region.a, region.b),
+                    f"<span style='color: #c778dd; border: 1px solid #c778dd; border-radius: 5px; padding: 0 2px'>{c}</span>",
+                    sublime.LAYOUT_INLINE,
+                )
+                for c, region in zip(charset, matches)
+            ]
+            phantom_sets[view.id()].update(phantoms)
 
-        # TODO: make it work in multi view
-        # self.syntax = view.syntax()
-        # view.set_syntax_file(
-        #     "Packages/sublime-select-next-char/GoToChar.tmLanguage"
-        # )
-
-        phantoms = [
-            sublime.Phantom(
-                sublime.Region(region.a, region.b),
-                f"<span style='color: #c778dd; border: 1px solid #c778dd; border-radius: 5px; padding: 0 2px; font-size: 15px'>{c}</span>",
-                sublime.LAYOUT_INLINE,
+        else:
+            # TODO: make it work in multi view
+            self.syntax = view.syntax()
+            view.set_syntax_file(
+                "Packages/sublime-select-next-char/GoToChar.tmLanguage"
             )
-            for c, region in zip(charset, matches)
-        ]
-        phantom_sets[view.id()].update(phantoms)
 
-        # for i, (m, c) in enumerate(sorted(zip(self.matches, self.charset), key=lambda x: x[0].b)):
-        #     self.view.replace(edit, sublime.Region(m.a - i, m.b - i), "")
         return positions
 
     def _find_match_views(self, char):
+        """Find the matching chars in all active view and add labels."""
         self.positions = {}
         done = 0
-        print(self._active_views)
         for view in self._active_views:
             positions = self._find_match(char, view, self.charset[done:])
             done += len(positions)
             self.positions.update(
                 {c: (region, view) for c, region in positions.items()}
             )
+            if not USE_PHANTOMS:
+                view.run_command(
+                    "select_char_selection_add_labels",
+                    {"positions": [(c, m.a, m.b) for c, m in positions.items()]},
+                )
 
     @property
     def _active_views(self):
@@ -262,9 +271,41 @@ class SelectCharSelectionCommand(sublime_plugin.TextCommand):
             self.view.window().focus_view(self.positions[value][1])
 
     def on_cancel(self, *args, **kwargs):
-        for view in self._active_views:
-            phantom_sets[view.id()].update([])
+        if self.exit:
+            return
+        self.exit = True
 
         self.view.window().run_command("hide_panel", {"cancel": True})
-        # self.view.run_command("soft_undo")
-        # self.view.set_syntax_file(self.syntax)
+        for view in self._active_views:
+            view.run_command("select_char_selection_remove_labels")
+
+        if not USE_PHANTOMS:
+            self.view.set_syntax_file(self.syntax)  # TODO: many views
+
+
+class SelectCharSelectionAddLabelsCommand(sublime_plugin.TextCommand):
+    """Do those modifications in a command, to easily undo it once we are done."""
+
+    def run(self, edit, positions):
+        if USE_PHANTOMS:
+            pass
+        else:
+            self.view.add_regions(
+                "select_char_jump",
+                [sublime.Region(a, b) for _, a, b in positions],
+                "region.bluish",
+                flags=sublime.DRAW_NO_FILL,
+            )
+            for c, a, b in positions:
+                self.view.replace(edit, sublime.Region(a, b), c)
+
+
+class SelectCharSelectionRemoveLabelsCommand(sublime_plugin.TextCommand):
+    def run(self, edit):
+        if USE_PHANTOMS:
+            phantom_sets[self.view.id()].update([])
+        else:
+            self.view.erase_regions("select_char_jump")
+            self.view.end_edit(edit)
+            self.view.run_command("undo")
+        print("undo", self.view)
