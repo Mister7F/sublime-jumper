@@ -14,17 +14,17 @@
             "children": [
               {
                 "caption": "Settings",
-                "command": "edit_settings",
+                "command": "jumper_edit_settings",
                 "args": {
-                  "base_file": "${packages}/sublime-jumper/Jumper.sublime-settings",
+                  "base_file": "Jumper.sublime-settings",
                   "default": "{\n\t$0\n}\n"
                 }
               },
               {
                 "caption": "Key Bindings",
-                "command": "edit_settings",
+                "command": "jumper_edit_settings",
                 "args": {
-                  "base_file": "${packages}/sublime-jumper/Default.sublime-keymap",
+                  "base_file": "Default.sublime-keymap",
                   "user_file": "${packages}/User/Default (${platform}).sublime-keymap",
                   "default": "[\n\t$0\n]\n",
                 }
